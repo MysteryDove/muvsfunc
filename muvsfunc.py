@@ -5997,15 +5997,28 @@ class rescale:
         return upscaler(clip, width, height, src_left=src_left, src_top=src_top, src_width=src_width, src_height=src_height)
 
     class Rescaler:
-        def __init__(self, kernel: str = "bicubic", taps: int = 3, b: float = 0.0, c: float = 0.5, upscaler: Callable = None, blur: float = None):
+        def __init__(self, kernel: str = "bicubic", taps: int = 3, b: float = 0.0, c: float = 0.5,
+                     upscaler: Callable = None, blur: float = None, backend: str = "descale",
+                     dsmvc_backend: str = "auto"):
             kernel = kernel.lower()
+            backend = backend.lower()
+            dsmvc_backend = dsmvc_backend.lower()
+            if backend not in ("descale", "dsmvc"):
+                raise ValueError("backend must be either 'descale' or 'dsmvc'")
+            if dsmvc_backend not in ("auto", "cpu", "cuda", "vulkan", "metal"):
+                raise ValueError("dsmvc_backend must be one of 'auto', 'cpu', 'cuda', 'vulkan', or 'metal'")
+            if backend == "descale" and dsmvc_backend != "auto":
+                raise ValueError("dsmvc_backend can only be used with backend='dsmvc'")
             self.kernel = kernel
             self.taps, self.b, self.c, self.blur = taps, b, c, blur
             self.upscaler = upscaler
+            self.backend = backend
+            self.dsmvc_backend = dsmvc_backend
             bc_name = f"_{float(b):.3f}_{float(c):.3f}" if kernel == "bicubic" else ""
             taps_name = f"{taps}" if kernel == "lanczos" else ""
             blur_name = f"_x{float(blur):.2f}" if blur is not None and blur != 1.0 else ""
-            self.name = f"{kernel}{bc_name}{taps_name}{blur_name}"
+            backend_name = "" if backend == "descale" else f"_{backend}_{dsmvc_backend}"
+            self.name = f"{kernel}{bc_name}{taps_name}{blur_name}{backend_name}"
             self.descale_args = {}
             assert blur >= 0.75 if blur is not None else True, "blur < 0.75 is not supported"
 
@@ -6033,7 +6046,7 @@ class rescale:
             W, H = clip.width, clip.height
             self.descale_args = rescale._get_descale_args(W, H, width, height, base_height)
             kwargs = self.descale_args.copy()
-            return core.descale.Descale(clip, kernel=self.kernel, taps=self.taps, b=self.b, c=self.c, blur=self.blur, **kwargs)
+            return self._descale(clip, **kwargs)
 
         def descale_pro(self, clip: vs.VideoNode, width: Union[int, float] = None, height: Union[int, float] = None, base_width: int = None, base_height: int = None):
             if width is None:
@@ -6042,7 +6055,19 @@ class rescale:
                 height = clip.height
             self.descale_args = rescale._get_descale_args_pro(width, height, base_height, base_width)
             kwargs = self.descale_args.copy()
-            return core.descale.Descale(clip, kernel=self.kernel, taps=self.taps, b=self.b, c=self.c, blur=self.blur, **kwargs)
+            return self._descale(clip, **kwargs)
+
+        def _descale(self, clip: vs.VideoNode, **kwargs: Any) -> vs.VideoNode:
+            """Run the selected descale implementation with compatible args."""
+            descale = getattr(getattr(core, self.backend), "Descale")
+            if self.backend == "dsmvc":
+                # dsmvc implements the same inverse kernels but does not expose
+                # the legacy descale plugin's blur parameter.
+                if self.blur is not None and self.blur != 1.0:
+                    raise ValueError("blur is not supported by the dsmvc backend")
+                return descale(clip, kernel=self.kernel, taps=self.taps, b=self.b, c=self.c,
+                               backend=self.dsmvc_backend, **kwargs)
+            return descale(clip, kernel=self.kernel, taps=self.taps, b=self.b, c=self.c, blur=self.blur, **kwargs)
 
         def upscale(self, clip: vs.VideoNode, width: int, height: int, upscaler: Optional[Callable] = None) -> vs.VideoNode:
             from inspect import signature
@@ -6065,28 +6090,28 @@ class rescale:
                 return upscaler(clip, width, height, **kwargs)
 
     @staticmethod
-    def Bilinear(blur: float = None):
-        return rescale.Rescaler(kernel="bilinear", blur=blur)
+    def Bilinear(blur: float = None, backend: str = "descale", dsmvc_backend: str = "auto"):
+        return rescale.Rescaler(kernel="bilinear", blur=blur, backend=backend, dsmvc_backend=dsmvc_backend)
 
     @staticmethod
-    def Bicubic(b: float = 0.0, c: float = 0.5, blur: float = None):
-        return rescale.Rescaler(kernel="bicubic", b=b, c=c, blur=blur)
+    def Bicubic(b: float = 0.0, c: float = 0.5, blur: float = None, backend: str = "descale", dsmvc_backend: str = "auto"):
+        return rescale.Rescaler(kernel="bicubic", b=b, c=c, blur=blur, backend=backend, dsmvc_backend=dsmvc_backend)
 
     @staticmethod
-    def Lanczos(taps: int = 3, blur: float = None):
-        return rescale.Rescaler(kernel="lanczos", taps=taps, blur=blur)
+    def Lanczos(taps: int = 3, blur: float = None, backend: str = "descale", dsmvc_backend: str = "auto"):
+        return rescale.Rescaler(kernel="lanczos", taps=taps, blur=blur, backend=backend, dsmvc_backend=dsmvc_backend)
 
     @staticmethod
-    def Spline16(blur: float = None):
-        return rescale.Rescaler(kernel="spline16", blur=blur)
+    def Spline16(blur: float = None, backend: str = "descale", dsmvc_backend: str = "auto"):
+        return rescale.Rescaler(kernel="spline16", blur=blur, backend=backend, dsmvc_backend=dsmvc_backend)
 
     @staticmethod
-    def Spline36(blur: float = None):
-        return rescale.Rescaler(kernel="spline36", blur=blur)
+    def Spline36(blur: float = None, backend: str = "descale", dsmvc_backend: str = "auto"):
+        return rescale.Rescaler(kernel="spline36", blur=blur, backend=backend, dsmvc_backend=dsmvc_backend)
 
     @staticmethod
-    def Spline64(blur: float = None):
-        return rescale.Rescaler(kernel="spline64", blur=blur)
+    def Spline64(blur: float = None, backend: str = "descale", dsmvc_backend: str = "auto"):
+        return rescale.Rescaler(kernel="spline64", blur=blur, backend=backend, dsmvc_backend=dsmvc_backend)
 
 
 def measurediff(

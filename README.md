@@ -20,7 +20,7 @@ and the dependencies of them.
 
 - [CTMF](https://github.com/HomeOfVapourSynthEvolution/VapourSynth-CTMF)
 
-- [descale](https://github.com/Irrational-Encoding-Wizardry/descale)
+- [descale](https://github.com/Irrational-Encoding-Wizardry/descale) or [descalemvc](https://github.com/MysteryDove/vapoursynth-descalemvc)
 
 - [DFTTest](https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DFTTest)
 
